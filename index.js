@@ -2,12 +2,35 @@ const express = require("express");
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
+var jwt = require("jsonwebtoken");
 const app = express();
 const port = process.env.PORT || 5000;
 
 // middleware
 app.use(cors());
 app.use(express.json());
+
+// verify jwt token
+const verifyToken = (req, res, next) => {
+  const authorization = req.headers.authorization;
+
+  if (!authorization) {
+    return res
+      .status(400)
+      .send({ error: true, message: "Unauthorized Access" });
+  }
+
+  const token = authorization.split(" ")[1];
+
+  jwt.verify(token, process.env.JWT_SECRET_KEY, (err, decoded) => {
+    if (err) {
+      return res.status(400).send({ error: true, message: "token expired" });
+    }
+
+    req.decoded = decoded;
+    next();
+  });
+};
 
 // mongo db settings
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.5732rtt.mongodb.net/?retryWrites=true&w=majority`;
@@ -28,6 +51,15 @@ async function run() {
     const tourCollection = client.db("travelGoDB").collection("tours");
     const reviewCollection = client.db("travelGoDB").collection("reviews");
     const bookingCollection = client.db("travelGoDB").collection("bookings");
+
+    // jwt method
+    app.post("/jwt", async (req, res) => {
+      const user = req.body;
+      const token = jwt.sign(user, process.env.JWT_SECRET_KEY, {
+        expiresIn: "5h",
+      });
+      res.send({ token });
+    });
 
     // packages get method
     app.get("/packages", async (req, res) => {
@@ -85,11 +117,21 @@ async function run() {
     });
 
     // bookings by email query get method
-    app.get("/bookings", async (req, res) => {
-      const query = req.query;
-      const result = await bookingCollection
-        .find({ email: query.email })
-        .toArray();
+    app.get("/bookings", verifyToken, async (req, res) => {
+      const userEmail = req.query?.email;
+
+      if (req.decoded.email !== userEmail) {
+        return res
+          .status(401)
+          .send({ error: true, message: "Unauthorized Access" });
+      }
+
+      let query = {};
+      if (userEmail) {
+        query = { email: userEmail };
+      }
+
+      const result = await bookingCollection.find(query).toArray();
       res.send(result);
     });
 
